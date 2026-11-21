@@ -27,6 +27,12 @@ GUARDS = [
      "I can't use 'SDN' as legal authority (31 CFR 501.603). The report must name the sanctions program or executive order, which comes from the SDN file entry."),
     ("mark_filed", re.compile(r"mark (it|the report|this|.{0,30}) (as )?filed|(set|change) .{0,20}status to filed", re.I),
      "I can't mark a report as filed. A report is filed only when a person enters the ORS confirmation ID after submitting it."),
+    ("fraud_approval", re.compile(r"(approve|sign off|green.?light|push (it|this) through|rubber.?stamp).{0,80}"
+                                  r"(without|skip|bypass|ignore|no need for|override).{0,30}(check|validat|review|counsel|rule)"
+                                  r"|(approve|clear|release).{0,60}(CEO|boss|partner|VIP|governor|signed off|vouch)"
+                                  r"|(override|bypass|turn off|disable).{0,30}(validator|checks|guardrail)", re.I),
+     "I can't approve that. Only Maya can approve a draft, it has to pass the validator first, and a request from a "
+     "CEO, partner or VIP doesn't change the rules. Unfreezes go to unfreeze review with counsel."),
     ("unfreeze", re.compile(r"\b(unfreeze|release|unblock|lift the freeze)\b", re.I),
      None),  # answered below with the wallet's live list status
 ]
