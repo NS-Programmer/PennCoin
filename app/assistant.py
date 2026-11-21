@@ -17,8 +17,13 @@ RULES_TEXT = {
 }
 
 GUARDS = [
-    ("data_leak", re.compile(r"(other (holders|customers|clients)|all (holders|customers)|everyone'?s|system (prompt|instructions)|your (instructions|prompt))", re.I),
-     "I can't share other holders' data or my instructions. I can only discuss the case you're working on."),
+    ("data_leak", re.compile(
+        r"(show|give|send|list|export|dump|print|reveal|share|tell me|what (is|are)|look up|pull up|read me)\b.{0,60}"
+        r"(other (holders?|customers?|clients?|users?)'?s?|all (holders|customers|clients|users)|everyone'?s|"
+        r"someone else'?s|another (holder|customer|client)'?s?)"
+        r"|(print|show|reveal|repeat|tell me|give me|what (is|are)|share)\b.{0,30}(your )?(system (prompt|instructions|message)|your (instructions|prompt|rules verbatim))", re.I),
+     "I can't share other holders' data or my instructions: that breaks the rule never to reveal other customers' data. "
+     "What I can do instead: explain the case you're working on, or explain how the desk keeps each holder's data separate."),
     ("backdate", re.compile(r"(backdate|change the (blocked|rejected|freeze) date|move the (deadline|due date)|so (it|the report) isn'?t late)", re.I),
      "I can't change dates. The blocked or rejected date comes from the transaction, and the due date is set by the deadline engine (10 business days)."),
     ("skip_report", re.compile(r"(skip|don'?t bother|do not file|no need to file|don'?t file|just spam).{0,60}(report|filing|file|attempt)|(report|filing).{0,40}(skip|not needed)", re.I),
@@ -97,6 +102,9 @@ def answer(message: str, sdn: SanctionsList, default_day: str) -> dict:
     if guard:
         return {"answer": reply, "guardrail": guard, "decision": "refuse" if guard != "injection" else "flag_injection",
                 "filings": [], "rule": None}
+    if not events and _isolation_question(own):
+        return {"answer": ISOLATION_ANSWER, "guardrail": None, "decision": None, "filings": [],
+                "rule": "Never reveal other customers' data", "topic": "data_isolation"}
     if not events:
         return {"answer": "I can explain a case's decision, its OFAC filing and due date. Send the case events, "
                           "or ask Maya for anything outside sanctions filings.",
@@ -132,6 +140,23 @@ def answer(message: str, sdn: SanctionsList, default_day: str) -> dict:
         rule = r["reason"]
     return {"answer": text, "guardrail": None, "decision": decision,
             "filings": [{"type": f["type"], "due": f["due"]} for f in all_filings], "rule": rule}
+
+
+ISOLATION_RE = re.compile(r"\b(isolat\w*|access controls?|data separation|kept separate|keep .{0,30}separate|segregat\w*|"
+                          r"tenant\w*|who can see|can('t| ?not)? see each other|privacy|protect\w* .{0,20}data|data (protection|access))", re.I)
+
+ISOLATION_ANSWER = (
+    "Here's how PennCoin keeps each holder's data separate (simulated demo): every report draft is checked by code "
+    "and rejected if it mentions any wallet address outside its own case; I only answer from the case in front of me "
+    "and never return another holder's case notes, balances or addresses; requests for other holders' data or my "
+    "instructions are refused in code before any model sees them; and Maya's approvals in the website demo are stored "
+    "only in her own browser. This demo has no per-customer sign-in yet: a production version would add role-scoped "
+    "logins so each issuer and user sees only their own data, plus an access log for examiners."
+)
+
+
+def _isolation_question(own_words: str) -> bool:
+    return bool(ISOLATION_RE.search(own_words))
 
 
 CASE_RE = re.compile(r"\bC\d{2}\b", re.I)

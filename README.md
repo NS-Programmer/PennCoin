@@ -17,7 +17,7 @@ core (`app/`) in the browser with [Pyodide](https://pyodide.org). No backend, no
    git remote add origin https://github.com/<you>/<repo>.git && git push -u origin main
    ```
 2. In the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The **Deploy demo to GitHub Pages** action runs the 49 tests, builds `_site/` and publishes it.
+3. The **Deploy demo to GitHub Pages** action runs the 50 tests, builds `_site/` and publishes it.
    Your demo is at `https://<you>.github.io/<repo>/` (first load takes ~5 seconds while Python starts).
 
 **Preview locally:** `./scripts/build_site.sh && python -m http.server -d _site 8000`, then open http://localhost:8000.
@@ -120,7 +120,7 @@ The Ninoo Builder prompt is in `NINOO_PROMPT.md`. The API's `POST /api/assistant
    python -I app/make_prism.py data out    # builds out/model_comparison.json
    ```
    Name models directly (not `nicrron/auto`) so each run uses one model. Check exact names at nicrron.ai/docs/models.
-2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (49) and the score (23/23).
+2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (50) and the score (23/23).
 
 ## Design rules enforced in code
 - Rules decide (filing type, due date); the model only drafts and explains. A draft whose type or due date disagrees is rejected.
