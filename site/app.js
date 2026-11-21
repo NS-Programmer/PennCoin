@@ -18,6 +18,9 @@ const ATTACKS = [
 let py, bridge, DAYS = [];
 const snapCache = {};
 let scoreCache = null;
+const TOP_VIEWS = ["briefing", "queue", "cases", "assistant", "audit", "score"];
+let currentRoute = "briefing";   // e.g. "queue?status=filed", "item/<id>", "case/C01"
+let resetArmed = false;
 const main = document.getElementById("main");
 
 /* ------------------------------------------------------------ storage (per viewer, demo only) */
@@ -71,14 +74,16 @@ function dueHtml(item) {
   return `<span class="num">${esc(item.due)}</span>`;
 }
 function chip(status) { return `<span class="chip ${esc(status)}">${esc(titleCase(status))}</span>`; }
-function download(name, rows) {
-  if (!rows.length) return;
+function toCsv(rows) {
+  if (!rows.length) return "";
   const cols = Object.keys(rows[0]);
-  const csv = [cols.join(",")].concat(rows.map((r) => cols.map((c) => `"${String(r[c] ?? "").replace(/"/g, '""')}"`).join(","))).join("\n");
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a.download = name;
-  a.click();
+  return [cols.join(",")].concat(rows.map((r) => cols.map((c) => `"${String(r[c] ?? "").replace(/"/g, '""')}"`).join(","))).join("\n");
+}
+function copyText(text, button, done = "Copied") {
+  const old = button.textContent;
+  const ok = () => { button.textContent = done; setTimeout(() => { button.textContent = old; }, 1500); };
+  try { navigator.clipboard.writeText(text).then(ok, () => { button.textContent = "Copy blocked"; }); }
+  catch (_) { button.textContent = "Copy blocked"; }
 }
 
 /* ------------------------------------------------------------ review actions (mirror app/api.py rules) */
@@ -189,7 +194,7 @@ function renderItem(id) {
   const fields = i.draft_fields || {};
   const locked = i.status === "filed";
   main.innerHTML = head(i.title, `Drafted by ${esc(i.drafted_by)} · ${chip(i.status)} · due ${dueHtml(i)}`,
-      `<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="#/case/${encodeURIComponent(i.case)}">Open case ${esc(i.case)}</a>`) + `
+      `<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="#" data-href="#/case/${encodeURIComponent(i.case)}">Open case ${esc(i.case)}</a>`) + `
     <div class="why"><p>${esc(i.explanation)}</p><div class="label">${esc(i.rule)}</div></div>
     ${i.validator === "passed" ? `<div class="ok-box">All checks passed.</div>` :
       `<div class="problems"><strong>Checks failed</strong><ul>${i.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`}
@@ -205,6 +210,11 @@ function renderItem(id) {
           <button id="approve" class="primary" ${locked ? "disabled" : ""}>Approve</button>
           <button id="reject" class="danger" ${locked ? "disabled" : ""}>Reject</button>
         </div>
+        <div id="reject-box" class="form-row" hidden>
+          <label class="label" for="reject-reason">Reason for rejecting</label>
+          <textarea id="reject-reason" placeholder="e.g. Duplicate of C01"></textarea>
+          <div class="actions" style="margin-top:8px"><button id="reject-confirm" class="danger">Confirm reject</button><button id="reject-cancel">Cancel</button></div>
+        </div>
         <div class="form-row"><label class="label" for="ors">ORS confirmation ID</label>
           <input id="ors" type="text" placeholder="From OFAC's reporting system" value="${esc(i.ors_confirmation_id || "")}" ${i.status !== "approved" ? "disabled" : ""}></div>
         <button id="record" ${i.status !== "approved" ? "disabled" : ""}>Record ID and mark filed</button>
@@ -215,7 +225,10 @@ function renderItem(id) {
     </div>`;
   const sideMsg = (txt, ok) => { document.getElementById("side-msg").innerHTML = `<p class="msg ${ok ? "ok" : "err"}">${esc(txt)}</p>`; };
   document.getElementById("approve").onclick = () => { const e = approve(raw); e ? sideMsg(e) : route(); };
-  document.getElementById("reject").onclick = () => { const e = reject(raw, prompt("Reason for rejecting this draft:") || ""); e ? sideMsg(e) : route(); };
+  const box = document.getElementById("reject-box");
+  document.getElementById("reject").onclick = () => { box.hidden = false; document.getElementById("reject-reason").focus(); };
+  document.getElementById("reject-cancel").onclick = () => { box.hidden = true; };
+  document.getElementById("reject-confirm").onclick = () => { const e = reject(raw, document.getElementById("reject-reason").value); e ? sideMsg(e) : route(); };
   document.getElementById("record").onclick = () => { const e = recordOrs(raw, document.getElementById("ors").value); e ? sideMsg(e) : route(); };
   document.getElementById("edit-form").onsubmit = (ev) => {
     ev.preventDefault();
@@ -305,11 +318,11 @@ function renderAudit(params) {
   main.innerHTML = head("Audit log", "Read-only record for examiners.",
       `<button data-href="#/audit?tab=system" class="${tab === "system" ? "primary" : ""}">System</button>
        <button data-href="#/audit?tab=people" class="${tab === "people" ? "primary" : ""}">People</button>
-       <button id="csv">Export CSV</button>`) +
+       <button id="csv">Copy CSV</button>`) +
     (rows.length ? `<table><thead><tr>${Object.keys(rows[0]).map((k) => `<th>${esc(titleCase(k))}</th>`).join("")}</tr></thead><tbody>
       ${rows.map((r) => `<tr>${Object.values(r).map((v) => `<td>${esc(short(v))}</td>`).join("")}</tr>`).join("")}</tbody></table>`
       : `<p><strong>No actions yet.</strong></p><p class="muted">Approvals, edits and filings by people appear here.</p>`);
-  document.getElementById("csv").onclick = () => download(`audit-${tab}-${currentDay()}.csv`, rows);
+  document.getElementById("csv").onclick = (e) => copyText(toCsv(rows), e.target, "CSV copied");
 }
 
 function renderScore() {
@@ -322,7 +335,7 @@ function renderScore() {
       <div class="tile"><div class="label">Unneeded filings</div><div class="fig">${score.unneeded_filings}</div></div>
     </section>
     <section><table><thead><tr><th>Case</th><th>Label</th><th>Expected</th><th>Got</th><th class="right">Filings</th><th class="right">Due</th><th>Result</th></tr></thead><tbody>
-      ${rows.map((r) => `<tr><td><a href="#/case/${encodeURIComponent(r.case)}">${esc(r.case)}</a></td><td>${esc(r.label === "file" ? "File" : "Don't file")}</td>
+      ${rows.map((r) => `<tr><td><a href="#" data-href="#/case/${encodeURIComponent(r.case)}">${esc(r.case)}</a></td><td>${esc(r.label === "file" ? "File" : "Don't file")}</td>
         <td>${esc(titleCase(r.expected))}</td><td>${esc(titleCase(r.got))}</td><td class="right num">${r.filings_got} / ${r.filings_expected}</td>
         <td class="right num">${esc(r.due_got || "—")}</td><td>${r.pass ? chip("passed") : `<span class="chip problem">fail</span>`}</td></tr>`).join("")}
     </tbody></table></section>`;
@@ -330,7 +343,7 @@ function renderScore() {
 
 /* ------------------------------------------------------------ router */
 function route() {
-  const hash = location.hash.replace(/^#\/?/, "") || "briefing";
+  const hash = currentRoute || "briefing";
   const [pathPart, query] = hash.split("?");
   const [name, ...rest] = pathPart.split("/");
   const params = new URLSearchParams(query || "");
@@ -350,20 +363,54 @@ function route() {
 
 document.addEventListener("click", (e) => {
   const copy = e.target.closest("[data-copy]");
-  if (copy) { e.stopPropagation(); try { navigator.clipboard.writeText(copy.dataset.copy); copy.textContent = "copied"; } catch (_) { /* ignore */ } return; }
+  if (copy) { e.preventDefault(); e.stopPropagation(); copyText(copy.dataset.copy, copy, "copied"); return; }
   const link = e.target.closest("[data-href]");
-  if (link) { location.hash = link.dataset.href; return; }
+  if (link) { e.preventDefault(); go(link.dataset.href); return; }
   if (e.target.id === "next-day") { const i = DAYS.indexOf(currentDay()); loadStore().day = DAYS[Math.min(i + 1, DAYS.length - 1)]; saveStore(); route(); }
-  if (e.target.id === "reset") { if (confirm("Reset the demo? This clears approvals, filings and the chat in this browser.")) { memoryStore = { day: DAYS[0], reviews: {}, log: [], chat: [] }; saveStore(); route(); } }
+  if (e.target.id === "reset") {
+    if (!resetArmed) {  // two clicks instead of confirm(), which embedded previews block
+      resetArmed = true; e.target.textContent = "Click again to reset";
+      setTimeout(() => { resetArmed = false; const b = document.getElementById("reset"); if (b) b.textContent = "Reset demo"; }, 4000);
+      return;
+    }
+    resetArmed = false; memoryStore = { day: DAYS[0], reviews: {}, log: [], chat: [] }; saveStore(); route();
+  }
 });
 document.addEventListener("change", (e) => { if (e.target.id === "day-pick") { loadStore().day = e.target.value; saveStore(); route(); } });
-window.addEventListener("hashchange", route);
+/* Only top-level views go in the URL hash (#queue); detail views (a report, a case) live in page state. */
+function go(href) {
+  currentRoute = href.replace(/^#\/?/, "") || "briefing";
+  const plain = TOP_VIEWS.includes(currentRoute) ? currentRoute : null;
+  if (plain && location.hash !== `#${plain}`) { try { location.hash = plain; return; } catch (_) { /* fall through */ } }
+  route();
+}
+window.addEventListener("hashchange", () => {
+  const h = location.hash.replace(/^#\/?/, "");
+  currentRoute = TOP_VIEWS.includes(h) ? h : "briefing";
+  route();
+});
 
 /* ------------------------------------------------------------ boot */
+let booted = false;
+setTimeout(() => {
+  if (!booted) main.insertAdjacentHTML("beforeend", `<p class="msg err">Still loading after 45 seconds. The Python engine may be blocked on this network; try another browser or the GitHub Pages copy.</p>`);
+}, 45000);
 async function boot() {
   try {
-    py = await loadPyodide();
-    const fetchText = async (p) => { const r = await fetch(p); if (!r.ok) throw new Error(`Could not load ${p} (${r.status})`); return r.text(); };
+    // Optional settings for hosts that can't serve .py/.zip files (the claude.ai preview build sets these).
+    const CFG = window.FILINGS_CONFIG || {};
+    const opts = {};
+    if (CFG.stdlibBase64) {
+      const bin = Uint8Array.from(atob(CFG.stdlibBase64), (c) => c.charCodeAt(0));
+      opts.stdLibURL = URL.createObjectURL(new Blob([bin], { type: "application/zip" }));
+    }
+    py = await loadPyodide(opts);
+    const fetchText = async (p) => {
+      const url = p.endsWith(".py") || p.endsWith(".csv") ? p + (CFG.textSuffix || "") : p;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`Could not load ${url} (${r.status})`);
+      return r.text();
+    };
     py.FS.mkdirTree("/home/pyodide/app");
     py.FS.mkdirTree("/home/pyodide/data");
     py.FS.mkdirTree("/home/pyodide/prism");
@@ -377,9 +424,13 @@ async function boot() {
     if (!s.day || !DAYS.includes(s.day)) { s.day = DAYS[0]; saveStore(); }
     const v = snapshot().sanctions_list;
     document.getElementById("list-version").textContent = `OFAC SDN list as of ${v.data_as_of.slice(0, 10)} · sha256 ${v.sha256.slice(0, 12)}`;
+    booted = true;
+    const h = location.hash.replace(/^#\/?/, "");
+    currentRoute = TOP_VIEWS.includes(h) ? h : "briefing";
     route();
   } catch (err) {
     console.error(err);
+    booted = true;
     main.innerHTML = `<h1>Could not start</h1><p class="muted">${esc(err.message || err)}</p>
       <p class="muted">Serve this folder over HTTP (for example <span class="mono">python -m http.server</span>); opening the file directly won't load the data.</p>`;
   }
