@@ -25,6 +25,7 @@ from run_day import pipeline, days_between, draft_with_retry  # noqa: E402
 from drafter import NicrronDrafter, default_model, model_label  # noqa: E402
 import prism  # noqa: E402
 from assistant import answer_with_cases, load_case_questions  # noqa: E402
+import assistant_live  # noqa: E402
 
 DATA = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[1] / "data"))
 DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().parents[1] / "reviews.db"))
@@ -173,6 +174,14 @@ class Ask(BaseModel):
                 return str(m["content"])
         return None
 
+    def prior_turns(self) -> list:
+        """Earlier user/assistant turns (from `messages` or `history`), without the current question."""
+        turns = self.messages if isinstance(self.messages, list) else (self.history if isinstance(self.history, list) else [])
+        turns = [m for m in turns if isinstance(m, dict) and m.get("role") in ("user", "assistant")]
+        if self.messages and turns and turns[-1].get("role") == "user":
+            turns = turns[:-1]
+        return turns
+
 
 class Redraft(BaseModel):
     by: str = "maya"
@@ -199,10 +208,26 @@ def check_model_access(access_code: str | None, model: str):
     _recent_model_calls.append(now_s)
 
 
+ASSISTANT_CALLS_PER_MINUTE = int(os.environ.get("ASSISTANT_CALLS_PER_MINUTE", "30"))
+_recent_assistant_calls = []
+
+
+def check_assistant_rate():
+    """The live assistant spends Nicrron credits on an open endpoint: cap calls per minute."""
+    import time
+    now_s = time.monotonic()
+    _recent_assistant_calls[:] = [t for t in _recent_assistant_calls if now_s - t < 60]
+    if len(_recent_assistant_calls) >= ASSISTANT_CALLS_PER_MINUTE:
+        raise HTTPException(429, "Too many assistant questions this minute. Try again shortly.")
+    _recent_assistant_calls.append(now_s)
+
+
 # ---------------------------------------------------------------- routes
 @app.get("/api/health")
 def health():
-    return {"ok": True, "drafter": DRAFTER, "simulated": True}
+    return {"ok": True, "drafter": DRAFTER, "simulated": True,
+            "assistant": "nicrron" if assistant_live.enabled() else "rules",
+            "assistant_model": assistant_live.model() if assistant_live.enabled() else None}
 
 
 @app.get("/api/models")
@@ -426,13 +451,26 @@ def assistant(body: Ask, authorization: str | None = Header(default=None),
     start = time.monotonic()
     day = sim_day()
     res = answer_with_cases(text, run(day)["sdn"], day, EVENTS, CASE_QUESTIONS)
+    steps = [{"name": "rules_engine", "guardrail": res.get("guardrail"),
+              "decision": res.get("decision"), "rule": res.get("rule")}]
+    if assistant_live.enabled() and not res.get("guardrail"):
+        check_assistant_rate()
+        assistant_live.live_answer(text, res, body.prior_turns())
+        steps.append({"name": "nicrron_answer", "engine": res.get("engine"), **(res.get("live") or {})})
+    else:
+        res.setdefault("engine", "rules")
     latency = int((time.monotonic() - start) * 1000)
     res["output"] = {"text": res["answer"]}
-    res["trace"] = {"steps": [{"name": "rules_engine", "guardrail": res.get("guardrail"),
-                               "decision": res.get("decision"), "rule": res.get("rule")}]}
-    prism.send_trace("penncoin-rules-assistant", [{"role": "user", "content": text}], res["answer"], latency,
-                     agent_id="penncoin-assistant", agent_name="PennCoin filings assistant (rules)",
+    res["trace"] = {"steps": steps}
+    live = res.get("engine") == "nicrron"
+    usage = res.get("live") or {}
+    prism.send_trace(usage.get("model") if live else "penncoin-rules-assistant",
+                     [{"role": "user", "content": text}], res["answer"], latency,
+                     agent_id="penncoin-assistant-live" if assistant_live.enabled() else "penncoin-assistant",
+                     agent_name="PennCoin filings assistant (live, Nicrron)" if assistant_live.enabled()
+                     else "PennCoin filings assistant (rules)",
                      session_id=body.session_id or x_conversation_id,
                      metadata={"component": "assistant", "guardrail": res.get("guardrail"),
-                               "decision": res.get("decision"), "sim_day": day})
+                               "decision": res.get("decision"), "sim_day": day, "engine": res.get("engine"),
+                               "live_check": usage.get("check"), "provider": "Nicrron" if live else None})
     return res
