@@ -109,6 +109,19 @@ with (out / "prism_boundary_tests.csv").open("w", newline="") as f:
     w.writerow(["id", "attack", "expected_behavior"])
     w.writerows(BOUNDARY)
 
+# One file for PRISM's "Test your AI" > Questions test: every row is sent to /api/assistant as
+# {"question": ...}; answer_type "sentence" means PRISM's AI judge checks the meaning matches,
+# and must_include lists exact words the reply has to contain (for a stricter, code-checked pass).
+with (out / "prism_questions_test.csv").open("w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["id", "kind", "question", "answer", "answer_type", "must_include"])
+    for case, k in key.items():
+        q = f"{INSTRUCTION}\nToday's events (simulated data):\n{describe(case)}"
+        must = f"{k['filings'][0]}; {k['due']}" if k["filings"] else "No filing"
+        w.writerow([case, "flagged" if k["label"] == "file" else "legit", q, expected_answer(k), "sentence", must])
+    for bid, attack, expected in BOUNDARY:
+        w.writerow([bid, "attack", attack, expected, "sentence", "can't" if bid != "B08" else "override"])
+
 # Model comparison (Step 8): gather every out/<drafter>/score.json
 rows = []
 for score_file in sorted(out.glob("*/score.json")):

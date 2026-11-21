@@ -23,6 +23,7 @@ load_env()  # .env on your laptop; on Ninoo the same names are set as environmen
 from rules import validate  # noqa: E402
 from run_day import pipeline, days_between, draft_with_retry  # noqa: E402
 from drafter import NicrronDrafter, default_model, model_label  # noqa: E402
+import prism  # noqa: E402
 from assistant import answer_with_cases, load_case_questions  # noqa: E402
 
 DATA = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[1] / "data"))
@@ -154,7 +155,23 @@ class Day(BaseModel):
 
 
 class Ask(BaseModel):
-    message: str
+    """Accepts our own shape and the shapes PRISM's 'Test your AI' sends:
+    {"message"}, {"question"}, {"input", "history"} or {"messages": [{"role", "content"}]}."""
+    message: str | None = None
+    question: str | None = None
+    input: str | None = None
+    messages: list | None = None
+    history: object = None
+    session_id: str | None = None
+
+    def text(self) -> str | None:
+        for v in (self.message, self.question, self.input):
+            if isinstance(v, str) and v.strip():
+                return v
+        for m in reversed(self.messages or []):
+            if isinstance(m, dict) and m.get("role") == "user" and str(m.get("content", "")).strip():
+                return str(m["content"])
+        return None
 
 
 class Redraft(BaseModel):
@@ -196,6 +213,7 @@ def models():
         "models": [{"id": m, "label": model_label(m)} for m in MODEL_CHOICES],
         "live_drafts_enabled": bool(os.environ.get("NICRRON_API_KEY") and os.environ.get("DEMO_ACCESS_CODE")),
         "provider": "Nicrron",
+        "prism_tracing": prism.enabled(),
     }
 
 
@@ -390,7 +408,31 @@ def score():
 
 
 @app.post("/api/assistant")
-def assistant(body: Ask):
-    """Text endpoint for PRISM: guarded answers, every call names its rule or signal."""
+def assistant(body: Ask, authorization: str | None = Header(default=None),
+              x_conversation_id: str | None = Header(default=None)):
+    """Chat endpoint (PRISM 'Test your AI' target): guarded answers that name their rule or signal.
+
+    If ASSISTANT_API_KEY is set, callers must send `Authorization: Bearer <key>` (set the same key in PRISM).
+    The reply has `answer` (our field) and `output.text` (PRISM's default reply path).
+    """
+    import hmac
+    import time
+    key = os.environ.get("ASSISTANT_API_KEY", "")
+    if key and not (authorization and hmac.compare_digest(authorization, f"Bearer {key}")):
+        raise HTTPException(401, "Missing or wrong bearer key")
+    text = body.text()
+    if not text:
+        raise HTTPException(422, "Send the question as message, question, input or messages")
+    start = time.monotonic()
     day = sim_day()
-    return answer_with_cases(body.message, run(day)["sdn"], day, EVENTS, CASE_QUESTIONS)
+    res = answer_with_cases(text, run(day)["sdn"], day, EVENTS, CASE_QUESTIONS)
+    latency = int((time.monotonic() - start) * 1000)
+    res["output"] = {"text": res["answer"]}
+    res["trace"] = {"steps": [{"name": "rules_engine", "guardrail": res.get("guardrail"),
+                               "decision": res.get("decision"), "rule": res.get("rule")}]}
+    prism.send_trace("penncoin-rules-assistant", [{"role": "user", "content": text}], res["answer"], latency,
+                     agent_id="penncoin-assistant", agent_name="PennCoin filings assistant (rules)",
+                     session_id=body.session_id or x_conversation_id,
+                     metadata={"component": "assistant", "guardrail": res.get("guardrail"),
+                               "decision": res.get("decision"), "sim_day": day})
+    return res

@@ -11,7 +11,7 @@ I am providing a working, tested **Python FastAPI backend** in `app/api.py` (ent
 - **Do not rewrite, simplify or re-implement any logic** from `app/rules.py`, `app/drafter.py`, `app/assistant.py` or `app/run_day.py`. Do not move logic into the frontend.
 - The frontend only **calls the API routes below** and displays what they return.
 - If a route is missing something the UI needs, ask me before changing backend code.
-- After any backend change, `python -m unittest discover -s tests` must still pass (29 tests).
+- After any backend change, `python -m unittest discover -s tests` must still pass (36 tests).
 
 Backend settings (environment variables):
 - `DATA_DIR=data`, `DB_PATH=reviews.db`
@@ -20,6 +20,7 @@ Backend settings (environment variables):
 - `NICRRON_API_KEY` stored as a **secret**, only on the backend, never sent to the browser.
 - `NICRRON_MODEL=anthropic/claude-sonnet-5-5`, `NICRRON_MODELS=anthropic/claude-sonnet-5-5`
 - `DEMO_ACCESS_CODE` (secret), `ALLOWED_ORIGINS=https://ns-programmer.github.io`, `MODEL_CALLS_PER_MINUTE=10`
+- PRISM: `PRISMTRACE_API_KEY` (secret), `PRISMTRACE_PROJECT_ID`, optional `ASSISTANT_API_KEY` (secret)
 - On each review item, add a **"Redraft with Claude Sonnet 5.5"** button that calls `POST /api/queue/{id}/redraft` with header `X-Access-Code`, shows the result and its checks, and offers **Use this draft** (which calls `/edit`). `GET /api/models` says whether live drafts are on.
 
 ## Users

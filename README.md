@@ -17,7 +17,7 @@ core (`app/`) in the browser with [Pyodide](https://pyodide.org). No backend, no
    git remote add origin https://github.com/<you>/<repo>.git && git push -u origin main
    ```
 2. In the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The **Deploy demo to GitHub Pages** action runs the 29 tests, builds `_site/` and publishes it.
+3. The **Deploy demo to GitHub Pages** action runs the 36 tests, builds `_site/` and publishes it.
    Your demo is at `https://<you>.github.io/<repo>/` (first load takes ~5 seconds while Python starts).
 
 **Preview locally:** `./scripts/build_site.sh && python -m http.server -d _site 8000`, then open http://localhost:8000.
@@ -52,6 +52,20 @@ Each run's `score.json` now includes model calls, total time and tokens.
 The backend only allows live drafts when `NICRRON_API_KEY` and `DEMO_ACCESS_CODE` are set, the caller
 sends the access code, the model is in `NICRRON_MODELS`, and it's under `MODEL_CALLS_PER_MINUTE`.
 Without a backend the site keeps working with template drafts.
+
+## Testing with PRISM by Block Convey
+Two connections, both off until you set their settings (see `.env.example`):
+
+1. **Tracing.** Every Claude Sonnet 5.5 call (drafts and retries) and every chat answer is sent to
+   PRISM's REST trace API (`POST https://api.prism.blockconvey.com/api/traces`, key in the
+   `X-PRISMtrace-Key` header), grouped by report, with the case, filing type, model, time and tokens.
+   PRISM scores them automatically. Set `PRISMTRACE_API_KEY` and `PRISMTRACE_PROJECT_ID`.
+   (PRISM's proxy only covers Anthropic, OpenAI and Gemini directly, so Nicrron calls are traced by REST.)
+2. **"Test your AI" against the chat endpoint.** `POST <backend>/api/assistant` accepts every request
+   shape PRISM sends (`{"question"}`, `{"input","history"}`, `{"messages"}` or our `{"message"}`) and
+   returns the reply at `output.text`. Upload `prism/prism_questions_test.csv`: 23 labeled cases
+   (11 flagged, 12 legit) and 10 attacks, each with the expected answer and the words it must include.
+   To require a key, set `ASSISTANT_API_KEY` and give PRISM the same value as its bearer key.
 
 ## Python core
 Core: Python 3.10+ standard library only. Backend API: FastAPI (`requirements.txt`). Platforms: Nicrron (models), Ninoo (app + review queue), PRISM (tests).
@@ -94,7 +108,7 @@ The Ninoo Builder prompt is in `NINOO_PROMPT.md`. The API's `POST /api/assistant
    python -I app/make_prism.py data out    # builds out/model_comparison.json
    ```
    Name models directly (not `nicrron/auto`) so each run uses one model. Check exact names at nicrron.ai/docs/models.
-2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (29) and the score (23/23).
+2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (36) and the score (23/23).
 
 ## Design rules enforced in code
 - Rules decide (filing type, due date); the model only drafts and explains. A draft whose type or due date disagrees is rejected.

@@ -140,6 +140,8 @@ class NicrronDrafter:
         self.name = f"nicrron:{self.model}"
         self.last_latency_ms = None
         self.last_usage = None
+        self.session_id = None   # set per report so PRISM groups a draft and its retry
+        self.trace_meta = {}
         self.stats = {"model_calls": 0, "latency_ms": 0, "prompt_tokens": 0, "completion_tokens": 0}
 
     BASE_URL = os.environ.get("NICRRON_BASE_URL", "https://api.nicrron.ai/v1")
@@ -182,9 +184,17 @@ class NicrronDrafter:
         self.stats["latency_ms"] += self.last_latency_ms
         for k in ("prompt_tokens", "completion_tokens"):
             self.stats[k] += int((self.last_usage or {}).get(k) or 0)
+        import prism  # PRISM by Block Convey: record and score this call (no-op without its key)
+        usage = self.last_usage or {}
+        prism.send_trace(self.model, messages, text, self.last_latency_ms, agent_id="penncoin-drafter",
+                         agent_name="PennCoin OFAC report drafter", session_id=self.session_id,
+                         tokens_in=usage.get("prompt_tokens"), tokens_out=usage.get("completion_tokens"),
+                         metadata={"component": "drafter", "provider": "Nicrron", **self.trace_meta})
         return text
 
     def draft(self, filing: dict, issuer: dict, feedback=None) -> dict:
+        self.session_id = f"{filing.get('case', 'case')}-{filing['type']}-{filing['due']}"
+        self.trace_meta = {"case": filing.get("case"), "filing_type": filing["type"], "retry": bool(feedback)}
         raw = self.call_nicrron(build_prompt(filing, issuer, feedback)).strip()
         if raw.startswith("```"):  # some models wrap JSON in a code fence
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
