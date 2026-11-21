@@ -114,6 +114,15 @@ details.group[open] summary { border-left: 3px solid var(--brass); }
 .timeline li { padding: 12px 0; border-bottom: 1px solid var(--stone); display: grid; grid-template-columns: 170px 160px 1fr; gap: 16px; }
 .copy { border: none; background: none; height: auto; padding: 0 4px; color: var(--slate); font-size: 12px; cursor: pointer; }
 
+/* Model redraft */
+.model-box { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--stone); }
+.model-box select, .model-box input { width: 100%; margin-bottom: 12px; }
+.model-result { margin-top: 24px; background: var(--white); border-left: 3px solid var(--harbor); padding: 16px 20px; }
+.model-result .meta { font-size: 13px; color: var(--slate); margin-bottom: 8px; }
+.model-result dl { margin: 12px 0; font-size: 14px; }
+.model-result dt { color: var(--slate); font-size: 12px; margin-top: 8px; }
+.model-result dd { margin: 0; white-space: pre-wrap; }
+
 /* Loading */
 .loading .bar { height: 3px; background: var(--stone); margin-top: 24px; overflow: hidden; }
 .loading .bar div { height: 100%; width: 30%; background: var(--evergreen); animation: slide 1.2s ease-in-out infinite; }

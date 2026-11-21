@@ -11,13 +11,18 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from env import load_env  # noqa: E402
+
+load_env()  # .env on your laptop; on Ninoo the same names are set as environment variables
+
 from rules import validate  # noqa: E402
-from run_day import pipeline, days_between  # noqa: E402
+from run_day import pipeline, days_between, draft_with_retry  # noqa: E402
+from drafter import NicrronDrafter, default_model, model_label  # noqa: E402
 from assistant import answer_with_cases, load_case_questions  # noqa: E402
 
 DATA = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[1] / "data"))
@@ -26,7 +31,18 @@ DRAFTER = os.environ.get("DRAFTER", "template")
 GENIUS_EFFECTIVE = date(2027, 1, 18)
 
 app = FastAPI(title="PennCoin OFAC Filings Assistant (SIMULATED)")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# ALLOWED_ORIGINS: comma-separated sites that may call this API from a browser,
+# e.g. https://ns-programmer.github.io. Default "*" (any site) for local use.
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+
+# Live model drafts spend your Nicrron credits, so they are locked down:
+#  - DEMO_ACCESS_CODE must be set, and each request must send it in the X-Access-Code header
+#  - only models in NICRRON_MODELS may be used (default: Claude Sonnet 5.5)
+#  - at most MODEL_CALLS_PER_MINUTE redrafts per minute
+MODEL_CHOICES = [m.strip() for m in os.environ.get("NICRRON_MODELS", default_model()).split(",") if m.strip()]
+MODEL_CALLS_PER_MINUTE = int(os.environ.get("MODEL_CALLS_PER_MINUTE", "10"))
+_recent_model_calls = []
 
 EVENTS = json.loads((DATA / "events.json").read_text())
 SIM_DAYS = list(days_between(min(e["day"] for e in EVENTS), max(e["day"] for e in EVENTS)))
@@ -101,6 +117,12 @@ def save(item_id, action, by, detail=None, **fields):
                     (now(), item_id, action, by, json.dumps(detail) if detail else None))
 
 
+def save_log(item_id, action, by, detail=None):
+    with db() as con:
+        con.execute("INSERT INTO review_log (ts, item_id, action, by, detail) VALUES (?,?,?,?,?)",
+                    (now(), item_id, action, by, json.dumps(detail) if detail else None))
+
+
 def current_status(item_id):
     with db() as con:
         row = con.execute("SELECT status FROM reviews WHERE item_id=?", (item_id,)).fetchone()
@@ -135,10 +157,46 @@ class Ask(BaseModel):
     message: str
 
 
+class Redraft(BaseModel):
+    by: str = "maya"
+    model: str | None = None
+    day: str | None = None   # the simulated day the caller is looking at (the website keeps its own)
+
+
+def check_model_access(access_code: str | None, model: str):
+    import hmac
+    import time
+    expected = os.environ.get("DEMO_ACCESS_CODE", "")
+    if not os.environ.get("NICRRON_API_KEY"):
+        raise HTTPException(503, "Live model drafts are off: NICRRON_API_KEY is not set on the server.")
+    if not expected:
+        raise HTTPException(503, "Live model drafts are off: set DEMO_ACCESS_CODE on the server.")
+    if not access_code or not hmac.compare_digest(access_code, expected):
+        raise HTTPException(401, "Wrong or missing access code.")
+    if model not in MODEL_CHOICES:
+        raise HTTPException(400, f"Model not allowed here. Allowed: {', '.join(MODEL_CHOICES)}")
+    now_s = time.monotonic()
+    _recent_model_calls[:] = [t for t in _recent_model_calls if now_s - t < 60]
+    if len(_recent_model_calls) >= MODEL_CALLS_PER_MINUTE:
+        raise HTTPException(429, "Too many model drafts this minute. Try again shortly.")
+    _recent_model_calls.append(now_s)
+
+
 # ---------------------------------------------------------------- routes
 @app.get("/api/health")
 def health():
     return {"ok": True, "drafter": DRAFTER, "simulated": True}
+
+
+@app.get("/api/models")
+def models():
+    """What the website shows in its 'Redraft with' menu. Never returns the key."""
+    return {
+        "default": MODEL_CHOICES[0] if MODEL_CHOICES else None,
+        "models": [{"id": m, "label": model_label(m)} for m in MODEL_CHOICES],
+        "live_drafts_enabled": bool(os.environ.get("NICRRON_API_KEY") and os.environ.get("DEMO_ACCESS_CODE")),
+        "provider": "Nicrron",
+    }
 
 
 @app.get("/api/briefing")
@@ -232,6 +290,36 @@ def edit(item_id: str, body: Edit):
         raise HTTPException(422, {"problems": problems})
     save(item_id, "edit", body.by, None, status="awaiting_review", edited_fields=json.dumps(body.fields))
     return queue_item(item_id)
+
+
+@app.post("/api/queue/{item_id}/redraft")
+def redraft(item_id: str, body: Redraft, x_access_code: str | None = Header(default=None)):
+    """Ask a Nicrron model (default Claude Sonnet 5.5) for a fresh draft of one report.
+
+    The rules engine still fixes the filing type and due date, and the validator checks the
+    result (one retry with its feedback). Nothing is saved: Maya decides whether to use it.
+    """
+    model = body.model or (MODEL_CHOICES[0] if MODEL_CHOICES else default_model())
+    check_model_access(x_access_code, model)
+    day = body.day if body.day in SIM_DAYS else sim_day()
+    r = run(day)
+    pair = next(((i, f) for i, f in zip(r["queue"], r["filings"]) if i["item_id"] == item_id), None)
+    if not pair:
+        raise HTTPException(404, "No such review item on that day")
+    _, filing = pair
+    drafter = NicrronDrafter(model)
+    try:
+        draft, problems, attempts = draft_with_retry(drafter, filing, r["issuer"], {})
+    except Exception as err:  # network, auth or model errors: report, never crash
+        raise HTTPException(502, f"Nicrron call failed: {type(err).__name__}: {str(err)[:200]}")
+    save_log(item_id, "model_redraft", body.by, {"model": model, "passed": not problems, "attempts": attempts})
+    return {
+        "item_id": item_id, "model": model, "model_label": model_label(model), "provider": "Nicrron",
+        "validator": "passed" if not problems else "needs_human_fix", "problems": problems,
+        "attempts": attempts, "draft_fields": draft.get("fields") or {}, "explanation": draft.get("explanation"),
+        "latency_ms": drafter.stats["latency_ms"],
+        "tokens": drafter.stats["prompt_tokens"] + drafter.stats["completion_tokens"],
+    }
 
 
 @app.post("/api/queue/{item_id}/approve")

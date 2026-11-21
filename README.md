@@ -17,7 +17,7 @@ core (`app/`) in the browser with [Pyodide](https://pyodide.org). No backend, no
    git remote add origin https://github.com/<you>/<repo>.git && git push -u origin main
    ```
 2. In the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The **Deploy demo to GitHub Pages** action runs the 20 tests, builds `_site/` and publishes it.
+3. The **Deploy demo to GitHub Pages** action runs the 29 tests, builds `_site/` and publishes it.
    Your demo is at `https://<you>.github.io/<repo>/` (first load takes ~5 seconds while Python starts).
 
 **Preview locally:** `./scripts/build_site.sh && python -m http.server -d _site 8000`, then open http://localhost:8000.
@@ -31,6 +31,27 @@ Limits of the static demo:
 - Uses the **template drafter** only. Nicrron model drafts need your API key, which must never ship in a public page — run those locally (below).
 - Maya's approvals, edits and ORS IDs are saved **in each viewer's browser** (localStorage). "Reset demo" clears them.
 - GitHub Pages can't host an API, so the PRISM text endpoint (`POST /api/assistant`) needs the FastAPI backend running somewhere else (e.g. Ninoo or your laptop).
+
+## AI drafts with Claude Sonnet 5.5 (through Nicrron)
+The drafter calls Nicrron with the official `openai` library, exactly as in Nicrron's quickstart
+(`base_url="https://api.nicrron.ai/v1"`, key from `NICRRON_API_KEY`). Default model:
+**`anthropic/claude-sonnet-5-5`** (change with `NICRRON_MODEL`). The rules still decide the filing
+type and due date, and the validator checks every model draft (one retry, then a human).
+
+**On your laptop:**
+```bash
+cp .env.example .env          # then put your Nicrron key in .env (never commit it)
+pip install -r requirements.txt
+python -I app/run_day.py --drafter nicrron --data data --out out                     # Claude Sonnet 5.5
+python -I app/run_day.py --drafter nicrron:openai/gpt-6-sol --data data --out out     # any other Nicrron model
+```
+Each run's `score.json` now includes model calls, total time and tokens.
+
+**On the website:** each report has a **Redraft with Claude Sonnet 5.5** panel. It calls the backend
+(`POST /api/queue/{id}/redraft`), which holds the key. Set the backend's address in `site/config.js`.
+The backend only allows live drafts when `NICRRON_API_KEY` and `DEMO_ACCESS_CODE` are set, the caller
+sends the access code, the model is in `NICRRON_MODELS`, and it's under `MODEL_CALLS_PER_MINUTE`.
+Without a backend the site keeps working with template drafts.
 
 ## Python core
 Core: Python 3.10+ standard library only. Backend API: FastAPI (`requirements.txt`). Platforms: Nicrron (models), Ninoo (app + review queue), PRISM (tests).
@@ -66,14 +87,14 @@ The Ninoo Builder prompt is in `NINOO_PROMPT.md`. The API's `POST /api/assistant
 ## Two things to plug in
 1. **Nicrron** — connected (OpenAI-compatible API at `https://api.nicrron.ai/v1`, temperature 0, cached 24h). Set your key locally, never in code:
    ```bash
-   export NICRRON_API_KEY="sk-af-..."
+   cp .env.example .env    # put your key in .env, or: export NICRRON_API_KEY="..."
    python -I app/run_day.py --drafter nicrron:anthropic/claude-sonnet-5-5 --data data --out out
    python -I app/run_day.py --drafter nicrron:openai/gpt-6-sol --data data --out out
    python -I app/run_day.py --drafter nicrron:deepseek/deepseek-flash --data data --out out
    python -I app/make_prism.py data out    # builds out/model_comparison.json
    ```
    Name models directly (not `nicrron/auto`) so each run uses one model. Check exact names at nicrron.ai/docs/models.
-2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (20) and the score (23/23).
+2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (29) and the score (23/23).
 
 ## Design rules enforced in code
 - Rules decide (filing type, due date); the model only drafts and explains. A draft whose type or due date disagrees is rejected.

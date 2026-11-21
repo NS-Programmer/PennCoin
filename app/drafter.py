@@ -2,15 +2,34 @@
 
 Two drafters share one interface, draft(filing, issuer) -> dict:
   - TemplateDrafter: deterministic templates. Used for tests and as the baseline.
-  - NicrronDrafter: sends the same facts to a model through Nicrron. Fill in
-    `call_nicrron` with the Nicrron SDK/endpoint from its docs.
+  - NicrronDrafter: sends the same facts to a model through Nicrron, using the
+    official `openai` library pointed at Nicrron's OpenAI-compatible endpoint.
+    Default model: Claude Sonnet 5.5 (`anthropic/claude-sonnet-5-5`).
 
 The model never decides the filing type or the due date on its own: both come
 from the rules engine and the validator rejects any disagreement.
 """
 import json
+import os
+import time
 
 from brand import COIN
+
+DEFAULT_MODEL = "anthropic/claude-sonnet-5-5"
+MODEL_LABELS = {
+    "anthropic/claude-sonnet-5-5": "Claude Sonnet 5.5",
+    "openai/gpt-6-sol": "GPT-6 Sol",
+    "deepseek/deepseek-flash": "DeepSeek Flash",
+}
+
+
+def default_model() -> str:
+    """NICRRON_MODEL in .env / environment, else Claude Sonnet 5.5."""
+    return os.environ.get("NICRRON_MODEL") or DEFAULT_MODEL
+
+
+def model_label(model: str) -> str:
+    return MODEL_LABELS.get(model, model)
 
 RULE_STATUS = {
     "blocked_property": "31 CFR 501.603(b)(1) (final rule, in force)",
@@ -116,33 +135,54 @@ class NicrronDrafter:
     """Same facts, sent to a model through Nicrron. Use one instance per model
     to compare 2-3 models on the same cases (Step 8)."""
 
-    def __init__(self, model: str):
-        self.model = model
-        self.name = f"nicrron:{model}"
+    def __init__(self, model: str | None = None):
+        self.model = model or default_model()
+        self.name = f"nicrron:{self.model}"
+        self.last_latency_ms = None
+        self.last_usage = None
+        self.stats = {"model_calls": 0, "latency_ms": 0, "prompt_tokens": 0, "completion_tokens": 0}
 
-    BASE_URL = "https://api.nicrron.ai/v1"
+    BASE_URL = os.environ.get("NICRRON_BASE_URL", "https://api.nicrron.ai/v1")
 
     def call_nicrron(self, messages: list) -> str:
-        """OpenAI-compatible chat completion through Nicrron (standard library only).
+        """Chat completion through Nicrron, as in Nicrron's quickstart:
 
-        Key comes from the NICRRON_API_KEY environment variable, never from code.
+            client = OpenAI(base_url="https://api.nicrron.ai/v1", api_key=NICRRON_API_KEY)
+
+        The key comes from NICRRON_API_KEY (.env or environment), never from code.
         temperature 0 -> deterministic and cached by Nicrron for 24h (repeatable comparisons).
+        Falls back to the standard library if the `openai` package isn't installed.
         """
-        import os
-        import urllib.request
-
         key = os.environ.get("NICRRON_API_KEY")
         if not key:
-            raise RuntimeError("Set NICRRON_API_KEY in your environment first.")
-        body = json.dumps({"model": self.model, "messages": messages, "temperature": 0}).encode()
-        req = urllib.request.Request(
-            f"{self.BASE_URL}/chat/completions", data=body, method="POST",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            payload = json.loads(resp.read())
-            self.last_cache = resp.headers.get("x-nicrron-cache")
-        return payload["choices"][0]["message"]["content"]
+            raise RuntimeError("Set NICRRON_API_KEY in .env or your environment first.")
+        start = time.monotonic()
+        try:
+            from openai import OpenAI
+        except ImportError:
+            OpenAI = None
+        if OpenAI is not None:
+            client = OpenAI(base_url=self.BASE_URL, api_key=key, timeout=120, max_retries=2)
+            resp = client.chat.completions.create(model=self.model, messages=messages, temperature=0)
+            text = resp.choices[0].message.content or ""
+            self.last_usage = resp.usage.model_dump() if getattr(resp, "usage", None) else None
+        else:
+            import urllib.request
+            body = json.dumps({"model": self.model, "messages": messages, "temperature": 0}).encode()
+            req = urllib.request.Request(
+                f"{self.BASE_URL}/chat/completions", data=body, method="POST",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=120) as r:
+                payload = json.loads(r.read())
+            text = payload["choices"][0]["message"]["content"] or ""
+            self.last_usage = payload.get("usage")
+        self.last_latency_ms = int((time.monotonic() - start) * 1000)
+        self.stats["model_calls"] += 1
+        self.stats["latency_ms"] += self.last_latency_ms
+        for k in ("prompt_tokens", "completion_tokens"):
+            self.stats[k] += int((self.last_usage or {}).get(k) or 0)
+        return text
 
     def draft(self, filing: dict, issuer: dict, feedback=None) -> dict:
         raw = self.call_nicrron(build_prompt(filing, issuer, feedback)).strip()

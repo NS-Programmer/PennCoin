@@ -16,6 +16,10 @@ const ATTACKS = [
 ];
 
 let py, bridge, DAYS = [];
+const CFG = window.FILINGS_CONFIG || {};
+const BACKEND = String(CFG.backendUrl || "").replace(/\/+$/, "");
+let MODELS = null;            // from GET /api/models when a backend is connected
+const modelResults = {};      // item_id -> last model redraft shown on the page
 const snapCache = {};
 let scoreCache = null;
 const TOP_VIEWS = ["briefing", "queue", "cases", "assistant", "audit", "score"];
@@ -59,7 +63,13 @@ function reviewOf(item_id) {
 function merged(item) {
   const r = reviewOf(item.item_id);
   return { ...item, status: r.status, ors_confirmation_id: r.ors_id, reviewed_by: r.by, note: r.note,
-           draft_fields: r.edited_fields || item.draft_fields, edited: !!r.edited_fields };
+           draft_fields: r.edited_fields || item.draft_fields, edited: !!r.edited_fields,
+           drafted_label: r.model_source ? `${modelName(r.model_source)} via Nicrron, chosen by Maya`
+             : r.edited_fields ? `${item.drafted_by}, edited by Maya` : item.drafted_by };
+}
+function modelName(id) {
+  const m = MODELS && MODELS.models.find((x) => x.id === id);
+  return m ? m.label : id;
 }
 function setReview(item_id, patch) {
   const s = loadStore();
@@ -110,7 +120,7 @@ function recordOrs(item, orsId) {
   logAction(item.item_id, "ors_id", "maya", { ors_id: orsId.trim() });
   return null;
 }
-function saveEdit(item, fields) {
+function saveEdit(item, fields, source) {
   if (merged(item).status === "filed") return ["Filed reports cannot be edited."];
   const problems = JSON.parse(bridge.validate_edit(item.item_id, currentDay(), JSON.stringify(fields)));
   if (problems.length) {
@@ -118,8 +128,8 @@ function saveEdit(item, fields) {
     logAction(item.item_id, "edit_rejected", "maya", { problems });
     return problems;
   }
-  setReview(item.item_id, { status: "awaiting_review", edited_fields: fields, by: "maya" });
-  logAction(item.item_id, "edit", "maya");
+  setReview(item.item_id, { status: "awaiting_review", edited_fields: fields, by: "maya", model_source: source || null });
+  logAction(item.item_id, source ? "use_model_draft" : "edit", "maya", source ? { model: source } : null);
   return [];
 }
 
@@ -193,7 +203,7 @@ function renderItem(id) {
   const i = merged(raw);
   const fields = i.draft_fields || {};
   const locked = i.status === "filed";
-  main.innerHTML = head(i.title, `Drafted by ${esc(i.drafted_by)} · ${chip(i.status)} · due ${dueHtml(i)}`,
+  main.innerHTML = head(i.title, `Drafted by ${esc(i.drafted_label)} · ${chip(i.status)} · due ${dueHtml(i)}`,
       `<a class="btn" style="display:inline-flex;align-items:center;text-decoration:none" href="#" data-href="#/case/${encodeURIComponent(i.case)}">Open case ${esc(i.case)}</a>`) + `
     <div class="why"><p>${esc(i.explanation)}</p><div class="label">${esc(i.rule)}</div></div>
     ${i.validator === "passed" ? `<div class="ok-box">All checks passed.</div>` :
@@ -221,8 +231,10 @@ function renderItem(id) {
         <div id="side-msg"></div>
         ${i.note ? `<p class="muted">Rejected: ${esc(i.note)}</p>` : ""}
         ${i.status !== "approved" && !locked ? `<p class="muted" style="font-size:13px">Approve first. A report is filed only when you enter its ORS confirmation ID.</p>` : ""}
+        ${modelBox(i, locked)}
       </div>
-    </div>`;
+    </div>
+    <div id="model-result">${modelResultHtml(i.item_id, locked)}</div>`;
   const sideMsg = (txt, ok) => { document.getElementById("side-msg").innerHTML = `<p class="msg ${ok ? "ok" : "err"}">${esc(txt)}</p>`; };
   document.getElementById("approve").onclick = () => { const e = approve(raw); e ? sideMsg(e) : route(); };
   const box = document.getElementById("reject-box");
@@ -230,6 +242,7 @@ function renderItem(id) {
   document.getElementById("reject-cancel").onclick = () => { box.hidden = true; };
   document.getElementById("reject-confirm").onclick = () => { const e = reject(raw, document.getElementById("reject-reason").value); e ? sideMsg(e) : route(); };
   document.getElementById("record").onclick = () => { const e = recordOrs(raw, document.getElementById("ors").value); e ? sideMsg(e) : route(); };
+  wireModelBox(raw, locked);
   document.getElementById("edit-form").onsubmit = (ev) => {
     ev.preventDefault();
     const data = {};
@@ -238,6 +251,78 @@ function renderItem(id) {
     document.getElementById("edit-msg").innerHTML = problems.length
       ? `<div class="problems"><strong>Not saved</strong><ul>${problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`
       : `<p class="msg ok">Edits saved and checked.</p>`;
+  };
+}
+
+/* ------------------------------------------------------------ Nicrron model redraft (needs the backend) */
+function accessCode() { try { return sessionStorage.getItem("penncoin.access") || ""; } catch (_) { return ""; } }
+function rememberCode(v) { try { sessionStorage.setItem("penncoin.access", v); } catch (_) { /* ignore */ } }
+function modelBox(item, locked) {
+  const head = `<div class="model-box"><h2>Redraft with a model</h2>`;
+  if (!BACKEND) return `${head}<p class="muted" style="font-size:13px">Drafts on this page come from templates. Live drafts from Claude Sonnet 5.5 through Nicrron turn on once the backend is connected (<span class="mono">config.js</span>).</p></div>`;
+  if (!MODELS) return `${head}<p class="msg err">Can't reach the backend at <span class="mono">${esc(BACKEND)}</span>. Template drafts still work.</p></div>`;
+  if (!MODELS.live_drafts_enabled) return `${head}<p class="muted" style="font-size:13px">Backend connected, but live drafts are off on the server (NICRRON_API_KEY or DEMO_ACCESS_CODE not set).</p></div>`;
+  const opts = MODELS.models.map((m) => `<option value="${esc(m.id)}" ${m.id === MODELS.default ? "selected" : ""}>${esc(m.label)}</option>`).join("");
+  return `${head}
+    <div class="form-row"><label class="label" for="model-pick">Model (through Nicrron)</label><select id="model-pick" ${locked ? "disabled" : ""}>${opts}</select></div>
+    <div class="form-row"><label class="label" for="access-code">Access code</label><input id="access-code" type="password" autocomplete="off" value="${esc(accessCode())}" ${locked ? "disabled" : ""}></div>
+    <button id="redraft" ${locked ? "disabled" : ""}>Redraft</button>
+    <p class="muted" style="font-size:13px">The rules still set the filing type and due date, and every model draft is checked before you can use it.</p></div>`;
+}
+function modelResultHtml(itemId, locked) {
+  const m = modelResults[itemId];
+  if (!m) return "";
+  if (m.pending) return `<div class="model-result"><div class="meta">Asking ${esc(m.label)} through Nicrron…</div></div>`;
+  if (m.error) return `<div class="model-result"><p class="msg err">${esc(m.error)}</p></div>`;
+  const secs = (m.latency_ms / 1000).toFixed(1);
+  return `<div class="model-result">
+    <div class="meta">${esc(m.model_label)} via ${esc(m.provider)} · ${secs} s · ${Number(m.tokens || 0).toLocaleString("en-US")} tokens · ${m.attempts === 1 ? "first try" : "after 1 retry"}</div>
+    ${m.validator === "passed" ? chip("passed") : `<div class="problems"><strong>Checks failed</strong><ul>${m.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul></div>`}
+    ${m.explanation ? `<p>${esc(m.explanation)}</p>` : ""}
+    <dl>${Object.entries(m.draft_fields || {}).map(([k, v]) => `<dt>${esc(titleCase(k))}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
+    ${m.validator === "passed" && !locked ? `<button id="use-model" class="primary">Use this draft</button>` : ""}
+  </div>`;
+}
+function wireModelBox(item, locked) {
+  const btn = document.getElementById("redraft");
+  const pick = document.getElementById("model-pick");
+  const label = () => (MODELS.models.find((m) => m.id === pick.value) || {}).label || pick.value;
+  if (btn) {
+    btn.textContent = `Redraft with ${label()}`;
+    pick.onchange = () => { btn.textContent = `Redraft with ${label()}`; };
+    btn.onclick = async () => {
+      const code = document.getElementById("access-code").value.trim();
+      rememberCode(code);
+      modelResults[item.item_id] = { pending: true, label: label() };
+      document.getElementById("model-result").innerHTML = modelResultHtml(item.item_id, locked);
+      btn.disabled = true;
+      try {
+        const r = await fetch(`${BACKEND}/api/queue/${encodeURIComponent(item.item_id)}/redraft`, {
+          method: "POST", headers: { "Content-Type": "application/json", "X-Access-Code": code },
+          body: JSON.stringify({ by: "maya", model: pick.value, day: currentDay() }),
+        });
+        const body = await r.json().catch(() => ({}));
+        modelResults[item.item_id] = r.ok ? body : { error: typeof body.detail === "string" ? body.detail : `Backend error ${r.status}` };
+        if (r.ok) logAction(item.item_id, "model_redraft", "maya", { model: body.model, passed: body.validator === "passed" });
+      } catch (err) {
+        modelResults[item.item_id] = { error: `Couldn't reach the backend: ${err.message || err}` };
+      }
+      btn.disabled = false;
+      document.getElementById("model-result").innerHTML = modelResultHtml(item.item_id, locked);
+      wireUseModel(item);
+    };
+  }
+  wireUseModel(item);
+}
+function wireUseModel(item) {
+  const use = document.getElementById("use-model");
+  if (!use) return;
+  use.onclick = () => {
+    const m = modelResults[item.item_id];
+    const problems = saveEdit(item, m.draft_fields, m.model);
+    if (problems.length) { document.getElementById("model-result").insertAdjacentHTML("beforeend", `<p class="msg err">${esc(problems.join("; "))}</p>`); return; }
+    delete modelResults[item.item_id];
+    route();
   };
 }
 
@@ -398,7 +483,6 @@ setTimeout(() => {
 async function boot() {
   try {
     // Optional settings for hosts that can't serve .py/.zip files (the claude.ai preview build sets these).
-    const CFG = window.FILINGS_CONFIG || {};
     const opts = {};
     if (CFG.stdlibBase64) {
       const bin = Uint8Array.from(atob(CFG.stdlibBase64), (c) => c.charCodeAt(0));
@@ -422,8 +506,17 @@ async function boot() {
     DAYS = JSON.parse(bridge.days());
     const s = loadStore();
     if (!s.day || !DAYS.includes(s.day)) { s.day = DAYS[0]; saveStore(); }
+    if (BACKEND) {
+      try {
+        const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 8000);
+        const r = await fetch(`${BACKEND}/api/models`, { signal: ctl.signal });
+        clearTimeout(t);
+        MODELS = r.ok ? await r.json() : null;
+      } catch (_) { MODELS = null; }
+    }
     const v = snapshot().sanctions_list;
-    document.getElementById("list-version").textContent = `OFAC SDN list as of ${v.data_as_of.slice(0, 10)} · sha256 ${v.sha256.slice(0, 12)}`;
+    const ai = MODELS && MODELS.live_drafts_enabled ? `AI drafts: ${MODELS.models[0].label} via Nicrron` : "AI drafts: templates";
+    document.getElementById("list-version").textContent = `${ai} · OFAC SDN list as of ${v.data_as_of.slice(0, 10)} · sha256 ${v.sha256.slice(0, 12)}`;
     booted = true;
     const h = location.hash.replace(/^#\/?/, "");
     currentRoute = TOP_VIEWS.includes(h) ? h : "briefing";

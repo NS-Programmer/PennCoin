@@ -27,7 +27,20 @@ def days_between(start: str, end: str):
 
 
 def make_drafter(name: str):
-    return TemplateDrafter() if name == "template" else NicrronDrafter(name.split(":", 1)[1])
+    """'template', 'nicrron' (default model: Claude Sonnet 5.5) or 'nicrron:<provider/model>'."""
+    if name == "template":
+        return TemplateDrafter()
+    return NicrronDrafter(name.split(":", 1)[1] if ":" in name else None)
+
+
+def draft_with_retry(drafter, filing, issuer, reported):
+    """Draft, check, and retry once with the validator's feedback. Returns (draft, problems, attempts)."""
+    draft = drafter.draft(filing, issuer)
+    problems = validate(filing, draft, issuer, reported)
+    if not problems:
+        return draft, problems, 1
+    draft = drafter.draft(filing, issuer, feedback=problems)
+    return draft, validate(filing, draft, issuer, reported), 2
 
 
 def pipeline(data: Path, drafter_name: str = "template", through_day: str | None = None, do_push: bool = False):
@@ -48,11 +61,8 @@ def pipeline(data: Path, drafter_name: str = "template", through_day: str | None
         results = match_day(day, events, sdn, state)
         for case, r in results.items():
             for filing in r["filings"]:
-                draft = drafter.draft(filing, issuer)
-                problems = validate(filing, draft, issuer, state.reported)
-                if problems:  # one retry with the validator's feedback, then a human
-                    draft = drafter.draft(filing, issuer, feedback=problems)
-                    problems = validate(filing, draft, issuer, state.reported)
+                # one retry with the validator's feedback, then a human
+                draft, problems, _ = draft_with_retry(drafter, filing, issuer, state.reported)
                 filing["status"] = "drafted" if not problems else "needs_human"
                 queue.append(review_item(filing, draft, problems, drafter.name))
                 filings_all.append(filing)
@@ -88,6 +98,7 @@ def pipeline(data: Path, drafter_name: str = "template", through_day: str | None
         "unneeded_filings": sum(r["filings_got"] > 0 for r in nofiles),
         "drafts": len(queue), "drafts_needing_human": sum(q["validator"] != "passed" for q in queue),
     }
+    score.update(getattr(drafter, "stats", {}))  # model calls, time and tokens (Nicrron runs only)
     return {"cases": cases, "queue": queue, "filings": filings_all, "issuer": issuer, "state": state, "score": score, "rows": rows,
             "events": events, "sdn": sdn, "drafter": drafter}
 
@@ -97,8 +108,11 @@ def main():
     ap.add_argument("--data", default="data")
     ap.add_argument("--out", default="out")
     ap.add_argument("--day", help="run from the first day THROUGH this day")
-    ap.add_argument("--drafter", default="template")
+    ap.add_argument("--drafter", default="template",
+                    help="template | nicrron (Claude Sonnet 5.5) | nicrron:<provider/model>")
     args = ap.parse_args()
+    from env import load_env
+    load_env()  # NICRRON_API_KEY / NICRRON_MODEL from .env, if present
 
     out = Path(args.out)
     r = pipeline(Path(args.data), args.drafter, args.day, do_push=True)
