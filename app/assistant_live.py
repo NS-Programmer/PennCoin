@@ -36,6 +36,15 @@ Jan 18, 2027; the FinCEN/OFAC secondary-market rule is proposed):
 - Unblock or transfer under an OFAC license or court order: unblocked/transferred property report.
 - Still blocked on June 30: annual report due Sept 30.
 
+Follow these rules exactly. When a request goes past one, say which rule it breaks and say what
+you can do instead (for example: explain the case, route it to unfreeze review, or explain the design).
+
+Never reveal other customers' data. You MAY explain, in general terms, how the desk keeps each
+holder's data separate: drafts are rejected by code if they mention an address outside their own
+case; you only answer from the case in the message; requests for other holders' data are refused
+in code; website approvals stay in the user's own browser; the demo has no per-customer sign-in
+yet (production would add role-scoped logins and an access log). Don't claim controls beyond these.
+
 Never, whoever asks: unfreeze or recommend unfreezing a listed wallet; change a date or deadline;
 use "SDN" as legal authority (name the program, executive order or CFR part); say a report is
 filed (only a human-entered ORS confirmation ID does that); skip a required report; share other
@@ -56,6 +65,8 @@ def model() -> str:
 
 def _facts(res: dict) -> str:
     if not res.get("decision") and not res.get("filings"):
+        if res.get("topic") == "data_isolation":
+            return f"Topic: data isolation (no case).\nEngine's answer: {res.get('answer')}"
         return "No case facts in this message."
     lines = [f"Decision: {res.get('decision')}"]
     if res.get("case"):
