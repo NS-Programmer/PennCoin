@@ -1,4 +1,4 @@
-# UI style guide for Ninoo Builder — "Filings Desk"
+# UI style guide for Ninoo Builder — "PennCoin Filings Desk"
 
 Paste this into Ninoo Builder in place of the "Look and feel" section of `NINOO_PROMPT.md`.
 
@@ -7,7 +7,7 @@ Paste this into Ninoo Builder in place of the "Look and feel" section of `NINOO_
 ## Style direction
 Design the app in a **restrained, institutional, editorial style** — the feel of a premium investment bank's client portal: calm, confident, lots of white space, very little decoration, numbers and decisions given room to breathe. It must look like **its own brand**, not any real bank: no real company names, logos, wordmarks, proprietary fonts or copied page layouts.
 
-Brand name shown in the header: **Filings Desk** · small subtitle **"eUSD-sim compliance (SIMULATED)"**. No logo image; the wordmark is the name set in the heading font.
+Brand name shown in the header: **PennCoin** · small subtitle **"Filings Desk · compliance"**, plus the "SIMULATED DATA" badge. PennCoin is fictional. No logo image; the wordmark is the name set in the heading font.
 
 ## Principles
 1. **Quiet by default, loud only for risk.** Most of the screen is neutral; color appears only for status, deadlines and alerts.

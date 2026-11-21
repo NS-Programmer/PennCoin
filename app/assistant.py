@@ -126,3 +126,33 @@ def answer(message: str, sdn: SanctionsList, default_day: str) -> dict:
         rule = r["reason"]
     return {"answer": text, "guardrail": None, "decision": decision,
             "filings": [{"type": f["type"], "due": f["due"]} for f in all_filings], "rule": rule}
+
+
+CASE_RE = re.compile(r"\bC\d{2}\b", re.I)
+
+
+def answer_with_cases(message: str, sdn: SanctionsList, day: str, events: list, questions: dict) -> dict:
+    """Like answer(), but a short question that names a case ("Why does C01 need a report?") is
+    answered from that case's events (`questions`: case id -> PRISM labeled-set question).
+    Guardrails always run first on the user's own words."""
+    first = answer(message, sdn, day)
+    if first.get("guardrail") or "{" in message:
+        return first
+    for case in (c.upper() for c in CASE_RE.findall(message)):
+        happened = any(e["case"] == case and e["day"] <= day for e in events)
+        if not happened:
+            first["answer"] = f"Case {case} hasn't happened yet on {day}. Move the simulated day forward first."
+            continue
+        if questions.get(case):
+            res = answer(questions[case], sdn, day)
+            res["answer"] = f"Case {case}: " + res["answer"]
+            res["case"] = case
+            return res
+    return first
+
+
+def load_case_questions(path) -> dict:
+    import csv
+    from pathlib import Path
+    p = Path(path)
+    return {r["id"]: r["question"] for r in csv.DictReader(p.open())} if p.exists() else {}

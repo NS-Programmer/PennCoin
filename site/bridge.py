@@ -3,9 +3,7 @@
 It only reuses the tested core in app/ (rules, drafter, run_day, assistant).
 No rule logic lives here. Every function returns a JSON string.
 """
-import csv
 import json
-import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -15,7 +13,7 @@ sys.path.insert(0, str(ROOT / "app"))
 
 from rules import validate, is_business_day  # noqa: E402
 from run_day import pipeline, days_between  # noqa: E402
-from assistant import answer  # noqa: E402
+from assistant import answer_with_cases, load_case_questions  # noqa: E402
 
 DATA = ROOT / "data"
 GENIUS_EFFECTIVE = date(2027, 1, 18)
@@ -90,33 +88,8 @@ def validate_edit(item_id, day, fields_json):
     return json.dumps(["No such review item"])
 
 
-CASE_RE = re.compile(r"\bC\d{2}\b", re.I)
-_questions = None
-
-
-def _case_question(case):
-    """The PRISM labeled-set question for a case: its events plus the context a reviewer would have."""
-    global _questions
-    if _questions is None:
-        path = ROOT / "prism" / "prism_labeled_set.csv"
-        _questions = {r["id"]: r["question"] for r in csv.DictReader(path.open())} if path.exists() else {}
-    return _questions.get(case)
+_questions = load_case_questions(ROOT / "prism" / "prism_labeled_set.csv")
 
 
 def ask(message, day):
-    sdn = _run(day)["sdn"]
-    first = answer(message, sdn, day)
-    if first.get("guardrail") or "{" in message:
-        return json.dumps(first)
-    # "Why does C01 need a report?" -> answer from that case's events, if the case has happened yet
-    for case in (c.upper() for c in CASE_RE.findall(message)):
-        happened = any(e["case"] == case and e["day"] <= day for e in EVENTS)
-        q = _case_question(case)
-        if happened and q:
-            res = answer(q, sdn, day)
-            res["answer"] = f"Case {case}: " + res["answer"]
-            res["case"] = case
-            return json.dumps(res)
-        if not happened:
-            first["answer"] = f"Case {case} hasn't happened yet on {day}. Move the simulated day forward first."
-    return json.dumps(first)
+    return json.dumps(answer_with_cases(message, _run(day)["sdn"], day, EVENTS, _questions))

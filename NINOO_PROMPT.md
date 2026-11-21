@@ -4,14 +4,14 @@ Paste everything below the line into Ninoo Builder, then upload this project fol
 
 ---
 
-Build a web app called **"Filings Desk"** for a stablecoin compliance team. It is a hackathon demo with **simulated** data, so show a small "SIMULATED DATA" badge in the header on every screen. Do not use any real company's name, logo or branding.
+Build a web app called **"PennCoin Filings Desk"** for the compliance team of PennCoin, a fictional USD stablecoin. It is a hackathon demo with **simulated** data, so show a small "SIMULATED DATA" badge in the header on every screen. Do not use any real company's name, logo or branding.
 
 ## Most important rule: keep my backend as it is
 I am providing a working, tested **Python FastAPI backend** in `app/api.py` (entry point `api:app`, app directory `app/`, dependencies in `requirements.txt`). It contains all of the compliance logic: sanctions matching, deadlines, report checks and the assistant's guardrails.
 - **Do not rewrite, simplify or re-implement any logic** from `app/rules.py`, `app/drafter.py`, `app/assistant.py` or `app/run_day.py`. Do not move logic into the frontend.
 - The frontend only **calls the API routes below** and displays what they return.
 - If a route is missing something the UI needs, ask me before changing backend code.
-- After any backend change, `python -m unittest discover -s tests` must still pass (19 tests).
+- After any backend change, `python -m unittest discover -s tests` must still pass (20 tests).
 
 Backend settings (environment variables):
 - `DATA_DIR=data`, `DB_PATH=reviews.db`

@@ -1,22 +1,23 @@
-# OFAC Filings Assistant — hackathon build (SIMULATED eUSD)
+# PennCoin Filings Desk — OFAC filings assistant (hackathon build, SIMULATED)
 
-Concept demo modeled on a small state-chartered stablecoin issuer. Not affiliated with Telcoin.
+**PennCoin** is a fictional USD stablecoin, modeled on a Nebraska state-chartered digital asset bank's coin. Not affiliated with any real issuer.
+Branding lives in one file: `app/brand.py` (coin name, app name, issuer details).
 Sanctions data is the **official OFAC SDN list** (SDN_ENHANCED.XML, data as of 2026-11-20).
 All blockchain activity is **simulated** (`data/events.json`); sanctioned parties use real SDN
 entity addresses, everyone else uses `0x51…` placeholders.
 
 ## Live demo on GitHub Pages (no server)
-The `site/` folder is a static web app — the **Filings Desk** — that runs the same tested Python
+The `site/` folder is a static web app — the **PennCoin Filings Desk** — that runs the same tested Python
 core (`app/`) in the browser with [Pyodide](https://pyodide.org). No backend, no API key.
 
 **Deploy:**
 1. Create an empty GitHub repo and push this folder to its `main` branch:
    ```bash
-   git init -b main && git add . && git commit -m "Filings Desk demo"
+   git init -b main && git add . && git commit -m "PennCoin Filings Desk demo"
    git remote add origin https://github.com/<you>/<repo>.git && git push -u origin main
    ```
 2. In the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The **Deploy demo to GitHub Pages** action runs the 19 tests, builds `_site/` and publishes it.
+3. The **Deploy demo to GitHub Pages** action runs the 20 tests, builds `_site/` and publishes it.
    Your demo is at `https://<you>.github.io/<repo>/` (first load takes ~5 seconds while Python starts).
 
 **Preview locally:** `./scripts/build_site.sh && python -m http.server -d _site 8000`, then open http://localhost:8000.
@@ -42,7 +43,7 @@ python -I -m unittest discover -s tests -v                    # Steps 4-6 tests
 python -I app/run_day.py --data data --out out                # Steps 7-10 (all days)
 python -I app/run_day.py --day 2027-02-01 --data data --out out   # one day
 python -I app/make_prism.py data out                          # Step 11 exports + Step 8 comparison
-uvicorn api:app --app-dir app --reload                        # backend API for the Ninoo app
+uvicorn main:app --reload                                     # backend API (Ninoo app + PRISM endpoint)
 ```
 The Ninoo Builder prompt is in `NINOO_PROMPT.md`. The API's `POST /api/assistant` is the text endpoint for PRISM.
 
@@ -72,7 +73,7 @@ The Ninoo Builder prompt is in `NINOO_PROMPT.md`. The API's `POST /api/assistant
    python -I app/make_prism.py data out    # builds out/model_comparison.json
    ```
    Name models directly (not `nicrron/auto`) so each run uses one model. Check exact names at nicrron.ai/docs/models.
-2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (19) and the score (23/23).
+2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (20) and the score (23/23).
 
 ## Design rules enforced in code
 - Rules decide (filing type, due date); the model only drafts and explains. A draft whose type or due date disagrees is rejected.
@@ -87,10 +88,10 @@ The Ninoo Builder prompt is in `NINOO_PROMPT.md`. The API's `POST /api/assistant
 - A1: each blocked on-chain attempt is a reportable rejected transaction.
 - Day 1 of the 10-business-day count is the day after the action.
 - Comprehensively sanctioned jurisdictions list in `rules.py` (Iran, Cuba, North Korea): verify current programs.
-- eUSD contract names (`Blacklisted`, `AddedBlacklist`, `RemovedBlacklist`) checked from the interface only; the contract is upgradeable.
+- PennCoin reuses the contract names of the Nebraska coin it is modeled on (`Blacklisted`, `AddedBlacklist`, `RemovedBlacklist`), checked from that contract's interface only; it is upgradeable.
 
 ## 3-minute demo script
-1. **Setup (20s):** "Small issuer, two chains, January 18 deadline. Official SDN list from Nov 20; simulated eUSD activity."
+1. **Setup (20s):** "Small issuer, two chains, January 18 deadline. Official SDN list from Nov 20; simulated PennCoin activity."
 2. **Before (40s):** paste PRISM boundary test B01 ("CEO says unfreeze") and B04 ("write SDN as authority") into a plain model in Nicrron with no guardrails; show it complying.
 3. **After (60s):** open the Pages demo (or Ninoo). Show C01: one combined Lazarus Group report, $19,700, Executive Order 13722, due Feb 16 (Presidents' Day skipped). Show C06 (out of gas → no report) and C21 (delisting → no report).
 4. **Attack (30s):** C18 spam spike → 25 drafts batched + volume alert; C14/C20 refusals; C15 memo injection flagged.

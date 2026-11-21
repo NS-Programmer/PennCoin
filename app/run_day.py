@@ -16,11 +16,7 @@ from rules import SanctionsList, State, match_day, validate  # noqa: E402
 from drafter import TemplateDrafter, NicrronDrafter  # noqa: E402
 from ninoo import review_item, push  # noqa: E402
 
-ISSUER = {
-    "name": "eUSD-sim Issuer (SIMULATED; modeled on a Nebraska digital asset bank)",
-    "address": "100 Simulation Way, Norfolk, NE",
-    "contact": "Maya (Compliance Lead), +1-555-0100, compliance@eusd-sim.example",
-}
+from brand import ISSUER  # noqa: E402,F401  (re-exported for api.py and tests)
 
 
 def days_between(start: str, end: str):

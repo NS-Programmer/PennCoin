@@ -10,6 +10,8 @@ from the rules engine and the validator rejects any disagreement.
 """
 import json
 
+from brand import COIN
+
 RULE_STATUS = {
     "blocked_property": "31 CFR 501.603(b)(1) (final rule, in force)",
     "rejected_transaction": "31 CFR 501.604 (final rule, in force); on-chain reverts reportable per team assumption A1",
@@ -70,7 +72,7 @@ class TemplateDrafter:
                   if "target" in f else f"Comprehensively sanctioned jurisdiction: {f.get('destination_country')}")
         docs = "Signed case note; SDN list snapshot (sha256 on file); transaction receipts"
         if t == "blocked_property":
-            lines = [f"{h['chain']}: {h['amount']:,} eUSD at {h['address']} (freeze tx {h['freeze_tx']})" for h in f["holdings"]]
+            lines = [f"{h['chain']}: {h['amount']:,} {COIN} at {h['address']} (freeze tx {h['freeze_tx']})" for h in f["holdings"]]
             fields = {
                 "holder": holder,
                 "transaction_description": "Issuer blacklisted the wallet at the token contract (AddedBlacklist) on: "
@@ -79,16 +81,16 @@ class TemplateDrafter:
                 "property": "; ".join(lines),
                 "date_blocked": min(h["frozen_at"] for h in f["holdings"])[:10],
                 "usd_value": f["usd_value"],
-                "action_taken": "Address added to the eUSD blacklist on every chain held; tokens cannot move. "
+                "action_taken": f"Address added to the {COIN} blacklist on every chain held; tokens cannot move. "
                                 "Held in place, not converted to fiat (OFAC FAQ 646).",
                 "legal_authority": f["legal_authority"],
                 "documents": docs,
             }
-            expl = (f"A wallet on the SDN list held {f['usd_value']:,} eUSD across {len(lines)} chain(s). "
+            expl = (f"A wallet on the SDN list held {f['usd_value']:,} {COIN} across {len(lines)} chain(s). "
                     "It was frozen everywhere, which blocks the property and requires one combined report.")
         elif t == "rejected_transaction":
             if "tx_hash" in f:
-                desc = (f"Attempted {f['call']} of {f['amount']:,} eUSD on {f['chain']} from {f['from']} "
+                desc = (f"Attempted {f['call']} of {f['amount']:,} {COIN} on {f['chain']} from {f['from']} "
                         f"to {f['to']} (sender {f['sender']}), tx {f['tx_hash']}, reverted with Blacklisted.")
                 date_rej = f["rejected_at"][:10]
             else:
@@ -101,7 +103,7 @@ class TemplateDrafter:
             expl = "A transaction involving a sanctioned party or jurisdiction was rejected, which is reportable within 10 business days."
         else:  # unblock_transfer
             fields = {"holder": holder, "target": f"{target}; blocked wallet {f['address']}",
-                      "property": f"{f['amount']:,} eUSD on {f['chain']} transferred to {f['to']}",
+                      "property": f"{f['amount']:,} {COIN} on {f['chain']} transferred to {f['to']}",
                       "date_unblocked": filing["action_day"], "usd_value": f["usd_value"],
                       "legal_authority": f["legal_authority"],
                       "original_report": f"Original blocked property report ORS ID {f['original_report_ors_id']}"}

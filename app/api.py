@@ -18,18 +18,19 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rules import validate  # noqa: E402
 from run_day import pipeline, days_between  # noqa: E402
-from assistant import answer  # noqa: E402
+from assistant import answer_with_cases, load_case_questions  # noqa: E402
 
 DATA = Path(os.environ.get("DATA_DIR", Path(__file__).resolve().parents[1] / "data"))
 DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().parents[1] / "reviews.db"))
 DRAFTER = os.environ.get("DRAFTER", "template")
 GENIUS_EFFECTIVE = date(2027, 1, 18)
 
-app = FastAPI(title="OFAC Filings Assistant (SIMULATED eUSD)")
+app = FastAPI(title="PennCoin OFAC Filings Assistant (SIMULATED)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 EVENTS = json.loads((DATA / "events.json").read_text())
 SIM_DAYS = list(days_between(min(e["day"] for e in EVENTS), max(e["day"] for e in EVENTS)))
+CASE_QUESTIONS = load_case_questions(DATA.parent / "prism" / "prism_labeled_set.csv")
 _cache = {}
 
 
@@ -303,4 +304,5 @@ def score():
 @app.post("/api/assistant")
 def assistant(body: Ask):
     """Text endpoint for PRISM: guarded answers, every call names its rule or signal."""
-    return answer(body.message, run()["sdn"], sim_day())
+    day = sim_day()
+    return answer_with_cases(body.message, run(day)["sdn"], day, EVENTS, CASE_QUESTIONS)

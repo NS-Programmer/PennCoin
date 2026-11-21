@@ -7,6 +7,8 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
+from brand import COIN
+
 # ---------------------------------------------------------------------------
 # Step 5: deadline engine
 # ---------------------------------------------------------------------------
@@ -137,11 +139,11 @@ def match_day(day: str, events: list, sdn: SanctionsList, state: State):
             continue
         held = [s for s in snaps if s["amount"] > 0]
         if not held:
-            result(case, "no_action", "Newly listed wallet holds no eUSD on any chain.")
+            result(case, "no_action", f"Newly listed wallet holds no {COIN} on any chain.")
             continue
         freezes = [e for e in todays if e["type"] == "AddedBlacklist" and e["address"].lower() == addr]
         if not freezes:
-            result(case, "freeze_needed", "Listed wallet holds eUSD; awaiting human approval to freeze.")
+            result(case, "freeze_needed", f"Listed wallet holds {COIN}; awaiting human approval to freeze.")
             continue
         holdings = []
         for s in held:
@@ -159,7 +161,7 @@ def match_day(day: str, events: list, sdn: SanctionsList, state: State):
                  "legal_authority": authority_of(entry), "list_version": sdn.version["sha256"],
                  "approved_by": freezes[0].get("approved_by")}
         state.reported[addr] = "PENDING"
-        result(case, "freeze", "Exact SDN match holding eUSD; frozen on all chains.",
+        result(case, "freeze", f"Exact SDN match holding {COIN}; frozen on all chains.",
                [_filing("blocked_property", case, action_day, facts)])
 
     # Failed transfers (rejection monitor, assumption A1)

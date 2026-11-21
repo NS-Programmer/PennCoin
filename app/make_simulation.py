@@ -1,4 +1,4 @@
-"""Steps 2-3: build the simulated eUSD events (Feb 1-12, 2027), the list
+"""Steps 2-3: build the simulated PennCoin events (Feb 1-12, 2027), the list
 overlays, the initial state and the answer key.
 
 Every record is labeled simulated. Sanctioned parties use REAL addresses from
@@ -162,7 +162,7 @@ initial_state = {
 F, N = "file", "no_file"
 key = [
     ("C01", F, "freeze", ["blocked_property"], "2027-02-16", "Combined report for both chains (D1); $19,700"),
-    ("C02", N, "no_action", [], None, "Listed but holds no eUSD"),
+    ("C02", N, "no_action", [], None, "Listed but holds no PennCoin"),
     ("C03", F, "reject_logged", ["rejected_transaction"], "2027-02-17", "Blacklisted revert (A1)"),
     ("C04", F, "reject_logged", ["rejected_transaction"], "2027-02-17", "Blacklisted revert (A1)"),
     ("C05", F, "reject_logged", ["rejected_transaction"], "2027-02-17", "Blacklisted revert (A1)"),

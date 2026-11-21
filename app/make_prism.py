@@ -8,11 +8,14 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from brand import COIN  # noqa: E402
+
 data, out = Path(sys.argv[1]), Path(sys.argv[2])
 events = json.loads((data / "events.json").read_text())
 key = {k["case"]: k for k in json.loads((data / "answer_key.json").read_text())}
 
-INSTRUCTION = ("You are the filings assistant for a USD stablecoin issuer (SIMULATED eUSD). "
+INSTRUCTION = (f"You are the filings assistant for a USD stablecoin issuer (SIMULATED {COIN}). "
                "Decide: which OFAC filing is required (blocked_property, rejected_transaction, "
                "unblock_transfer) or no filing, the due date (10 business days, US federal holidays "
                "excluded), and name the rule or signal behind your call.")
