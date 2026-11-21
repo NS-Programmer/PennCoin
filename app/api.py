@@ -164,6 +164,7 @@ class Ask(BaseModel):
     messages: list | None = None
     history: object = None
     session_id: str | None = None
+    day: str | None = None   # the simulated day the website is showing (optional)
 
     def text(self) -> str | None:
         for v in (self.message, self.question, self.input):
@@ -239,6 +240,10 @@ def models():
         "live_drafts_enabled": bool(os.environ.get("NICRRON_API_KEY") and os.environ.get("DEMO_ACCESS_CODE")),
         "provider": "Nicrron",
         "prism_tracing": prism.enabled(),
+        "assistant_live": assistant_live.enabled(),
+        "assistant_model": assistant_live.model() if assistant_live.enabled() else None,
+        "assistant_needs_code": bool(os.environ.get("ASSISTANT_API_KEY")),
+        "assistant_code_set": bool(os.environ.get("DEMO_ACCESS_CODE")),
     }
 
 
@@ -434,22 +439,28 @@ def score():
 
 @app.post("/api/assistant")
 def assistant(body: Ask, authorization: str | None = Header(default=None),
-              x_conversation_id: str | None = Header(default=None)):
+              x_conversation_id: str | None = Header(default=None),
+              x_access_code: str | None = Header(default=None)):
     """Chat endpoint (PRISM 'Test your AI' target): guarded answers that name their rule or signal.
 
     If ASSISTANT_API_KEY is set, callers must send `Authorization: Bearer <key>` (set the same key in PRISM).
+    The website can't hold that key, so it may instead send the DEMO_ACCESS_CODE the person types
+    (X-Access-Code header), the same code that unlocks live redrafts.
     The reply has `answer` (our field) and `output.text` (PRISM's default reply path).
     """
     import hmac
     import time
     key = os.environ.get("ASSISTANT_API_KEY", "")
-    if key and not (authorization and hmac.compare_digest(authorization, f"Bearer {key}")):
-        raise HTTPException(401, "Missing or wrong bearer key")
+    code = os.environ.get("DEMO_ACCESS_CODE", "")
+    by_key = bool(key and authorization and hmac.compare_digest(authorization, f"Bearer {key}"))
+    by_code = bool(code and x_access_code and hmac.compare_digest(x_access_code, code))
+    if key and not (by_key or by_code):
+        raise HTTPException(401, "Missing or wrong bearer key (or access code)")
     text = body.text()
     if not text:
         raise HTTPException(422, "Send the question as message, question, input or messages")
     start = time.monotonic()
-    day = sim_day()
+    day = body.day if body.day in SIM_DAYS else sim_day()
     res = answer_with_cases(text, run(day)["sdn"], day, EVENTS, CASE_QUESTIONS)
     steps = [{"name": "rules_engine", "guardrail": res.get("guardrail"),
               "decision": res.get("decision"), "rule": res.get("rule")}]
