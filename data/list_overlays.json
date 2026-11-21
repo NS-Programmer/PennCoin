@@ -1,0 +1,15 @@
+{
+  "simulated": true,
+  "note": "Real SDN list (Nov 20, 2026) with scripted changes for the demo.",
+  "not_yet_listed_before": {
+    "2027-02-01": [
+      "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+      "0x7FF9cFad3877F21d41Da833E2F775dB0569eE3D9"
+    ]
+  },
+  "removed_on": {
+    "2027-02-12": [
+      "0x67d40EE1A85bf4a4Bb7Ffae16De985e8427B6b45"
+    ]
+  }
+}

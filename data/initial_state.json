@@ -1,0 +1,23 @@
+{
+  "simulated": true,
+  "frozen": [
+    {
+      "address": "0x67d40EE1A85bf4a4Bb7Ffae16De985e8427B6b45",
+      "chain": "ethereum",
+      "amount": 3000,
+      "frozen_on": "2027-01-20",
+      "blocked_report_ors_id": "SIM-ORS-0001"
+    },
+    {
+      "address": "0x2f389ce8bd8ff92de3402ffce4691d17fc4f6535",
+      "chain": "polygon",
+      "amount": 2000,
+      "frozen_on": "2027-01-25",
+      "blocked_report_ors_id": "SIM-ORS-0002"
+    }
+  ],
+  "tokens": {
+    "ethereum": "0x51e05d0000000000000000000000000000e05d01",
+    "polygon": "0x51e05d0000000000000000000000000000e05d89"
+  }
+}

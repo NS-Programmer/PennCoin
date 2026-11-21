@@ -1,0 +1,9 @@
+{
+  "source_file": "SDN_ENHANCED.XML",
+  "sha256": "841bb0ac587781bec668816b274353fdd09e35b49d3085ccddde5271c88feb7c",
+  "data_as_of": "2026-11-20T00:00:00-05:00",
+  "loaded_at": "2026-11-21T17:43:30+00:00",
+  "entities_with_wallets": 114,
+  "wallet_count": 1082,
+  "evm_wallet_count": 137
+}
