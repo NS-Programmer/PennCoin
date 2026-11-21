@@ -17,7 +17,7 @@ core (`app/`) in the browser with [Pyodide](https://pyodide.org). No backend, no
    git remote add origin https://github.com/<you>/<repo>.git && git push -u origin main
    ```
 2. In the repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. The **Deploy demo to GitHub Pages** action runs the 36 tests, builds `_site/` and publishes it.
+3. The **Deploy demo to GitHub Pages** action runs the 46 tests, builds `_site/` and publishes it.
    Your demo is at `https://<you>.github.io/<repo>/` (first load takes ~5 seconds while Python starts).
 
 **Preview locally:** `./scripts/build_site.sh && python -m http.server -d _site 8000`, then open http://localhost:8000.
@@ -30,7 +30,19 @@ with CSV export, and Scorecard (23/23 against the answer key).
 Limits of the static demo:
 - Uses the **template drafter** only. Nicrron model drafts need your API key, which must never ship in a public page — run those locally (below).
 - Maya's approvals, edits and ORS IDs are saved **in each viewer's browser** (localStorage). "Reset demo" clears them.
-- GitHub Pages can't host an API, so the PRISM text endpoint (`POST /api/assistant`) needs the FastAPI backend running somewhere else (e.g. Ninoo or your laptop).
+- GitHub Pages can't host an API, so the PRISM text endpoint (`POST /api/assistant`) needs the FastAPI backend running somewhere else (Render, below; or Ninoo or your laptop).
+
+## Host the backend on Render (live assistant for PRISM)
+`render.yaml` is a Render Blueprint for the FastAPI backend.
+1. In Render: **New → Blueprint**, pick this repo. Render reads `render.yaml`.
+2. Enter the secrets when asked: `NICRRON_API_KEY` and `DEMO_ACCESS_CODE` (required); `ASSISTANT_API_KEY`, `PRISMTRACE_API_KEY`, `PRISMTRACE_PROJECT_ID` (optional). They live only in Render.
+3. When the deploy is live, open `https://<service>.onrender.com/api/health`: it should say `"assistant": "nicrron"`.
+4. PRISM's "Test your AI" address is `https://<service>.onrender.com/api/assistant`.
+5. Optional: put the same URL in `site/config.js` (`backendUrl`) so the Pages demo can use live drafts.
+
+**Live assistant (`ASSISTANT_MODE=nicrron`, `app/assistant_live.py`):** guardrails run first in code and are never sent to the model; the rules engine decides the case; then Nicrron (Claude Sonnet 5.5) writes the answer from the engine's facts. A deterministic check makes sure the answer keeps every due date and filing count, says "no filing" when there is none, never uses "SDN" as legal authority and never claims a report was filed. If the check fails or Nicrron is down, the rules engine's own answer is returned (`engine: rules_fallback`). Calls are capped by `ASSISTANT_CALLS_PER_MINUTE` (default 30). Without `ASSISTANT_MODE=nicrron` the endpoint stays rules-only.
+
+Free Render instances sleep after 15 minutes idle; open `/api/health` first to wake it (about a minute). The SQLite review database (`reviews.db`) is reset on every redeploy or restart, which is fine for the simulated demo.
 
 ## AI drafts with Claude Sonnet 5.5 (through Nicrron)
 The drafter calls Nicrron with the official `openai` library, exactly as in Nicrron's quickstart
@@ -108,7 +120,7 @@ The Ninoo Builder prompt is in `NINOO_PROMPT.md`. The API's `POST /api/assistant
    python -I app/make_prism.py data out    # builds out/model_comparison.json
    ```
    Name models directly (not `nicrron/auto`) so each run uses one model. Check exact names at nicrron.ai/docs/models.
-2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (36) and the score (23/23).
+2. **Ninoo** — paste `NINOO_PROMPT.md` into Ninoo Builder and use `app/api.py` as the Python (FastAPI) backend. The API refuses to mark anything filed without a human-entered ORS confirmation ID, and refuses to approve a draft that failed the checks until it is fixed. After any Ninoo change, re-run the tests (46) and the score (23/23).
 
 ## Design rules enforced in code
 - Rules decide (filing type, due date); the model only drafts and explains. A draft whose type or due date disagrees is rejected.
